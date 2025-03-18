@@ -1,141 +1,60 @@
 // InteractiveMap.js
-import React, { useState, useEffect, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import React, { useState, useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import { useNavigate } from 'react-router-dom';
+import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import LocationDetail from './LocationDetail';
+
+// Fix Leaflet icon issues by setting the paths to CDN resources
+// This needs to be done outside the component to avoid recreation on each render
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
+
+// Create custom icons for different types of locations
+const createCustomIcon = (type) => {
+  const iconColors = {
+    water: 'bg-blue-500',
+    mountain: 'bg-amber-700',
+    monument: 'bg-purple-600',
+    landmark: 'bg-emerald-600',
+  };
+  
+  const element = document.createElement('div');
+  element.className = `flex items-center justify-center w-8 h-8 rounded-full ${iconColors[type] || 'bg-emerald-600'} text-white shadow-lg`;
+  
+  return L.divIcon({
+    html: element.outerHTML,
+    className: 'custom-div-icon',
+    iconSize: [32, 32],
+    iconAnchor: [16, 32],
+  });
+};
+
+// Helper component to fly to a selected location
+function FlyToLocation({ selectedLocation }) {
+  const map = useMap();
+  
+  useEffect(() => {
+    if (selectedLocation) {
+      const { lat, lng } = selectedLocation.location.coordinates;
+      map.flyTo([lat, lng], 14, {
+        duration: 2
+      });
+    }
+  }, [selectedLocation, map]);
+  
+  return null;
+}
 
 const InteractiveMap = ({ locations }) => {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [fullscreenMode, setFullscreenMode] = useState(false);
-  const mapRef = useRef(null);
   const navigate = useNavigate();
-  
-  // Use effect for leaflet initialization - we'll use dynamic imports to avoid SSR issues
-  useEffect(() => {
-    // Dynamic import Leaflet to avoid SSR issues
-    const initializeMap = async () => {
-      const L = await import('leaflet');
-      
-      // Fix for Leaflet icons not displaying correctly
-      delete L.Icon.Default.prototype._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-      });
-      // Only initialize map if mapRef is defined and we don't already have a map
-      if (mapRef.current && !mapRef.current._leaflet_id) {
-        // Create the map
-        const map = L.map(mapRef.current).setView([15.317, 75.713], 7);
-        
-        // Add tile layer
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
-          maxZoom: 18,
-        }).addTo(map);
-        
-        // Create custom icons for different types of locations
-        const createCustomIcon = (type) => {
-          const iconColors = {
-            water: 'bg-blue-500',
-            mountain: 'bg-amber-700',
-            monument: 'bg-purple-600',
-            landmark: 'bg-emerald-600',
-          };
-          
-          const element = document.createElement('div');
-          element.className = `flex items-center justify-center w-8 h-8 rounded-full ${iconColors[type] || 'bg-emerald-600'} text-white shadow-lg`;
-          
-          return L.divIcon({
-            html: element.outerHTML,
-            className: 'custom-div-icon',
-            iconSize: [32, 32],
-            iconAnchor: [16, 32],
-          });
-        };
-        
-        // Add markers for each location
-        locations.forEach(location => {
-          const { lat, lng } = location.location.coordinates;
-          
-          // Determine icon type based on description
-          let iconType = 'landmark';
-          const description = location.fullDescription?.toLowerCase() || '';
-          
-          if (description.includes('lake') || description.includes('reservoir') || description.includes('water')) {
-            iconType = 'water';
-          } else if (description.includes('mountain') || description.includes('peak') || description.includes('hill')) {
-            iconType = 'mountain';
-          } else if (description.includes('fort') || description.includes('temple') || description.includes('monument')) {
-            iconType = 'monument';
-          }
-          
-          const marker = L.marker([lat, lng], { icon: createCustomIcon(iconType) }).addTo(map);
-          
-          // Create popup
-          const popupContent = document.createElement('div');
-          popupContent.className = 'p-2';
-          popupContent.innerHTML = `
-            <div class="font-semibold text-lg">${location.name}</div>
-            <p class="text-sm my-1">${location.shortDescription || ''}</p>
-            <button class="bg-emerald-700 text-white px-3 py-1 rounded-md text-sm mt-2 explore-button" data-location-id="${location.id}">
-              Explore
-            </button>
-          `;
-          
-          marker.bindPopup(popupContent);
-          
-          // Add event listener to the marker
-          marker.on('click', () => {
-            // In a real app, we might want to show a preview in the popup first
-            // But for now, we'll directly set the selected location
-            setSelectedLocation(location);
-          });
-        });
-        
-        // Add event listener to the explore buttons in popups
-        document.addEventListener('click', (e) => {
-          if (e.target.classList.contains('explore-button')) {
-            const locationId = e.target.getAttribute('data-location-id');
-            const location = locations.find(loc => loc.id === locationId);
-            if (location) {
-              setSelectedLocation(location);
-              setFullscreenMode(true);
-            }
-          }
-        });
-        
-        // Ensure the map takes up available space when container resizes
-        setTimeout(() => {
-          map.invalidateSize();
-        }, 0);
-        
-        // Store map reference for later use
-        mapRef.current._leafletMap = map;
-      }
-    };
-    
-    initializeMap();
-    
-    // Cleanup function
-    return () => {
-      if (mapRef.current && mapRef.current._leafletMap) {
-        mapRef.current._leafletMap.remove();
-        mapRef.current._leafletMap = null;
-      }
-    };
-  }, [locations]);
-  
-  // Effect to center map on selected location
-  useEffect(() => {
-    if (selectedLocation && mapRef.current && mapRef.current._leafletMap) {
-      const { lat, lng } = selectedLocation.location.coordinates;
-      mapRef.current._leafletMap.flyTo([lat, lng], 14, {
-        duration: 2
-      });
-    }
-  }, [selectedLocation]);
   
   const handleLocationClick = (locationId) => {
     navigate(`/${locationId}`);
@@ -173,27 +92,53 @@ const InteractiveMap = ({ locations }) => {
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
-        {locations.map(location => (
-          <Marker 
-            key={location.id} 
-            position={[location.location.coordinates.lat, location.location.coordinates.lng]}
-          >
-            <Popup>
-              <div>
-                <h3 className="font-bold text-lg">{location.name}</h3>
-                <p className="text-sm">{location.shortDescription}</p>
-                <button 
-                  onClick={() => handleLocationClick(location.id)}
-                  className="mt-2 px-4 py-2 bg-emerald-700 text-white rounded-md hover:bg-emerald-800 transition w-full"
-                >
-                  View Details
-                </button>
-              </div>
-            </Popup>
-          </Marker>
-        ))}
+        {locations.map(location => {
+          // Determine icon type based on description
+          let iconType = 'landmark';
+          const description = location.fullDescription?.toLowerCase() || '';
+          
+          if (description.includes('lake') || description.includes('reservoir') || description.includes('water')) {
+            iconType = 'water';
+          } else if (description.includes('mountain') || description.includes('peak') || description.includes('hill')) {
+            iconType = 'mountain';
+          } else if (description.includes('fort') || description.includes('temple') || description.includes('monument')) {
+            iconType = 'monument';
+          }
+          
+          return (
+            <Marker 
+              key={location.id} 
+              position={[location.location.coordinates.lat, location.location.coordinates.lng]}
+              icon={createCustomIcon(iconType)}
+              eventHandlers={{
+                click: () => {
+                  setSelectedLocation(location);
+                }
+              }}
+            >
+              <Popup>
+                <div>
+                  <h3 className="font-bold text-lg">{location.name}</h3>
+                  <p className="text-sm">{location.shortDescription}</p>
+                  <button 
+                    onClick={() => {
+                      handleLocationClick(location.id);
+                      // Alternative: show details in fullscreen mode
+                      // setFullscreenMode(true);
+                    }}
+                    className="mt-2 px-4 py-2 bg-emerald-700 text-white rounded-md hover:bg-emerald-800 transition w-full"
+                  >
+                    View Details
+                  </button>
+                </div>
+              </Popup>
+            </Marker>
+          );
+        })}
+        
+        {/* This component handles flying to a selected location */}
+        <FlyToLocation selectedLocation={selectedLocation} />
       </MapContainer>
-      
       
       {/* LocationDetail Modal */}
       {fullscreenMode && selectedLocation && (
